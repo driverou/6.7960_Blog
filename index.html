@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deep Learning Project Blog</title>
+    <link rel="stylesheet" href="style.css" />
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [
+            ["$", "$"],
+            ["\\(", "\\)"],
+          ],
+          displayMath: [
+            ["$$", "$$"],
+            ["\\[", "\\]"],
+          ],
+          processEscapes: true,
+        },
+        svg: {
+          fontCache: "global",
+        },
+      };
+    </script>
+    <script
+      id="MathJax-script"
+      async
+      src="./MathJax-3.2.0/es5/tex-mml-chtml.js"
+    ></script>
+  </head>
+
+  <body>
+    <header>
+      <div class="container">
+        <h1>
+          Learning Non-Linear Activations in CNNs for Autoencoding on CIFAR-10
+        </h1>
+        <div class="authors">Diego Rivero</div>
+        <div class="date">Fall 2024</div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="abstract">
+        <h2>Abstract</h2>
+        <p>
+          This study investigates the impact of learnable activation functions
+          on convolutional neural network (CNN) autoencoder performance using
+          the CIFAR-10 dataset. We compare eight different activation functions,
+          including both fixed and learnable variants, across seven model
+          scales. Our results demonstrate a tradeoff between model expressivity
+          and stability when using learnable activation functions. We present
+          insights into training stability considerations for learnable
+          activation functions and propose effective solutions using gradient
+          clipping and batch normalization. This work contributes to the growing
+          body of research on adaptive neural network components and provides
+          practical guidelines for implementing learnable activation functions
+          in deep learning architectures.
+        </p>
+      </section>
+
+      <section>
+        <h2>Motivation</h2>
+        <p>
+          The choice of activation functions in deep neural networks
+          fundamentally impacts model performance, training dynamics, and
+          computational efficiency. While fixed activation functions like ReLU
+          have become standard, they represent just one point in a vast space of
+          possible non-linear transformations. The motivation for exploring
+          learnable activation functions stems from several key theoretical and
+          practical considerations. Different layers in a neural network may
+          benefit from different types of non-linearities - early layers often
+          process low-level features where smooth transitions might be
+          beneficial, while deeper layers may require sharper decision
+          boundaries. Fixed activation functions impose the same non-linearity
+          across all layers, potentially limiting the network's representational
+          capacity. Learnable activation functions can adapt to layer-specific
+          requirements during training, potentially leading to more efficient
+          feature extraction. The optimal activation function may also vary
+          depending on the specific task and data distribution. In autoencoding,
+          the network must learn to compress and reconstruct high-dimensional
+          data, requiring careful preservation of information through the
+          bottleneck. Learnable activation functions provide additional degrees
+          of freedom that can be optimized specifically for this reconstruction
+          task. Recent theoretical work by Godfrey (2019) supports this
+          approach, demonstrating that parametric activation functions can
+          approximate a wider range of functional relationships compared to
+          fixed alternatives. The interaction between activation functions and
+          model scaling remains poorly understood. As neural networks grow
+          larger, the impact of activation function choice may become more
+          pronounced. While several learnable activation functions have been
+          proposed in the literature, there lacks a comprehensive comparative
+          study in the context of convolutional autoencoders. Our study fills
+          this gap by providing a systematic evaluation of both fixed and
+          learnable activation functions in the autoencoding setting, with
+          particular attention to training stability and computational overhead.
+          The insights gained have practical implications beyond autoencoding,
+          potentially informing the design of more efficient neural networks
+          across various tasks.
+        </p>
+      </section>
+
+      <section>
+        <h2>Prior Works</h2>
+        <p>
+          Research on activation functions has evolved significantly since the
+          introduction of ReLU, with particular attention being paid to
+          learnable variants that can adapt to specific tasks and architectures.
+          Several key works have shaped our understanding of parametric
+          activation functions and their potential benefits. Godfrey [1]
+          provided one of the first comprehensive evaluations of parametric
+          activation functions in deep learning. Their work demonstrated that
+          learnable parameters in activation functions can significantly improve
+          model performance across various tasks. Of particular relevance to our
+          study is their finding that parametric activation functions can help
+          mitigate the vanishing gradient problem while maintaining the benefits
+          of non-linear transformations. Their evaluation of the Bendable Linear
+          Unit (BLU), which we include in our comparison, showed promising
+          results in classification tasks, though its performance in
+          autoencoding tasks remains unexplored. A broader perspective on
+          activation functions was presented by Dubey et al. [2], who
+          conducted a comprehensive survey and performance analysis of
+          activation functions in deep learning. Their work categorized
+          activation functions based on their properties and analyzed their
+          impact on training dynamics. They highlighted the importance of
+          activation function selection in different network architectures and
+          provided a theoretical framework for understanding why certain
+          activation functions perform better in specific contexts. Their
+          analysis of the relationship between activation functions and network
+          depth particularly informs our investigation of model scaling effects.
+          In the context of transformer architectures, Shazeer [3] introduced
+          the SwiGLU activation function, demonstrating significant improvements
+          over traditional alternatives. While their work focused on transformer
+          models, the principles behind SwiGLU's success – namely its ability to
+          control information flow through learned parameters – are relevant to
+          our autoencoding task. Our inclusion of SwiGLU in a CNN architecture
+          represents a novel application of this activation function. Jin et al.
+          [4] introduced the S-shaped Rectified Linear Unit (SReLU), which
+          forms the basis for both our parametric and fixed SReLU
+          implementations. Their work demonstrated the benefits of having
+          learnable parameters that can adjust the activation function's shape
+          during training. The SReLU's ability to learn both positive and
+          negative slopes makes it particularly interesting for autoencoding
+          tasks where preserving information fidelity is crucial. More recent
+          work by Chieng et al. [5] on parametric activation functions
+          introduced the Flatten-T Swish activation, which builds upon the
+          success of the Swish function while adding learnable parameters. Their
+          work, along with the recent SwishReLU unified approach proposed by
+          Rahman et al. [6], demonstrates the ongoing evolution of activation
+          function design and the potential benefits of combining successful
+          elements from different activation functions. Our work builds upon
+          these foundations but differs in several key aspects. First, we
+          specifically focus on autoencoding tasks, where the objectives differ
+          significantly from the classification tasks that dominated previous
+          studies. Second, our investigation of the interaction between model
+          scale and activation function performance addresses a gap in the
+          existing literature. Third, our comprehensive comparison of both fixed
+          and learnable activation functions in a consistent architectural
+          framework provides insights into the practical trade-offs involved in
+          deployment. Finally, our focus on training stability and computational
+          efficiency adds practical considerations often overlooked in
+          theoretical treatments of activation functions.
+        </p>
+      </section>
+      <section>
+        <h2>Methodology</h2>
+
+        <h3>Data</h3>
+        <p class="indented">
+          The CIFAR-10 dataset provides an ideal testbed for our autoencoding
+          experiments due to its moderate complexity and manageable size. The
+          dataset consists of 60,000 32×32 color images across 10 classes, split
+          into 50,000 training and 10,000 validation images. To enhance model
+          robustness and prevent overfitting, we implement a comprehensive
+          preprocessing pipeline:
+        </p>
+
+        <ol>
+          <li>
+            <p>Normalization using CIFAR-10 channel-wise statistics:</p>
+            <ul>
+              <li>Mean: (0.4914, 0.4822, 0.4465)</li>
+              <li>Standard Deviation: (0.2470, 0.2435, 0.2616)</li>
+            </ul>
+            <p>
+              This standardization ensures consistent input distributions across
+              channels.
+            </p>
+          </li>
+
+          <li>
+            <p>Training augmentations:</p>
+            <ul>
+              <li>
+                Random cropping with padding=2 and reflective padding mode to
+                maintain spatial dimensions
+              </li>
+              <li>
+                Moderate random horizontal and vertical flips (p=0.1) to
+                introduce orientation invariance
+              </li>
+              <li>
+                Random rotation (±15 degrees) to enhance rotational robustness
+              </li>
+              <li>
+                Gaussian noise (μ=0, σ=0.05) to improve denoising capabilities
+                and prevent overfitting
+              </li>
+            </ul>
+          </li>
+        </ol>
+
+        <p class="indented">
+          The validation set uses only normalization without augmentations,
+          providing a clean, consistent basis for evaluating reconstruction
+          quality.
+        </p>
+
+        <h3>Autoencoder Architecture</h3>
+        <p class="indented">
+          Our convolutional autoencoder employs a symmetric design intended for
+          efficient information compression and reconstruction. The architecture
+          incorporates several modern deep learning practices:
+        </p>
+
+        <ol>
+          <li>
+            <p>Encoder Structure:</p>
+            <ul>
+              <li>
+                Input layer: Maps 3-channel RGB images to num_channels feature
+                maps
+              </li>
+              <li>
+                Progressive feature extraction through depth-controlled
+                convolutional layers
+              </li>
+              <li>
+                BatchNorm after each convolution to stabilize training and
+                reduce internal covariate shift
+              </li>
+              <li>
+                Downsampling every depth/4 layers using strided convolutions
+                (stride=2) to reduce dimensionality
+              </li>
+              <li>
+                Bottleneck compression to 2×2×2 dimensions, forcing efficient
+                feature encoding
+              </li>
+            </ul>
+          </li>
+
+          <li>
+            <p>Decoder Structure:</p>
+            <ul>
+              <li>Mirror-symmetric to encoder for balanced information flow</li>
+              <li>
+                Bilinear upsampling for smooth, artifact-free reconstruction
+              </li>
+              <li>
+                Maintains feature depth through most layers before final
+                projection to RGB space
+              </li>
+              <li>
+                Skip-connection-free design to enforce meaningful bottleneck
+                representations
+              </li>
+            </ul>
+          </li>
+
+          <li>
+            <p>Model Scaling Parameters:</p>
+            <ul>
+              <li>
+                num_channels: Controls network width (3, 6, or 9) affecting
+                feature richness
+              </li>
+              <li>
+                depth: Determines network depth (4, 8, 12, 24, or 44)
+                influencing hierarchical feature learning
+              </li>
+              <li>
+                Fixed 3×3 kernels balance receptive field growth with parameter
+                efficiency
+              </li>
+            </ul>
+          </li>
+        </ol>
+        <h3>Models Under Test</h3>
+        <p class="indented">
+          The following table presents the variations in model depth, width, and
+          paramter size that we will be using to compare our activation
+          functions:
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Model Number</th>
+              <th>Depth</th>
+              <th>Channel Width</th>
+              <th>Number of Paramters ($\pm 1$%*)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>4</td>
+              <td>3</td>
+              <td>657</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>8</td>
+              <td>3</td>
+              <td>1377</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>4</td>
+              <td>6</td>
+              <td>1953</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>12</td>
+              <td>3</td>
+              <td>2097</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>12</td>
+              <td>6</td>
+              <td>7425</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>24</td>
+              <td>6</td>
+              <td>15633</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>44</td>
+              <td>9</td>
+              <td>64377</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>*This does not include the SwiGLU models</p>
+        <h3>Activation Functions</h3>
+        <p class="indented">
+          We investigate a spectrum of activation functions, from simple fixed
+          forms to sophisticated learnable variants:
+        </p>
+
+        <ol>
+          <li>
+            <p><strong>Parametric Swish</strong>:</p>
+            <div class="equation-container">
+              $$f(x) = x \cdot \sigma(\beta x)$$
+            </div>
+            <div class="figure-container">
+              <figure>
+                <img src="./images/PSWISH_-.7 2.png" alt="Description 1" />
+                <figcaption>PSwish with $\beta$ = -.7</figcaption>
+              </figure>
+              <figure>
+                <img src="./images/PSWISH_1 2.png" alt="Description 2" />
+                <figcaption>PSwish with $\beta$ = 1</figcaption>
+              </figure>
+            </div>
+            <p>
+              A smooth, self-gated function where β controls the steepness of
+              the sigmoid gate. This allows the function to smoothly interpolate
+              between linear and ReLU-like behaviors.
+            </p>
+          </li>
+          <li>
+            <p><strong>Parameterized ReLU (PReLU)</strong>:</p>
+            <div class="equation-container">
+              $$f(x) = \text{right_slope} \cdot \max(0, x - x_{\text{offset}}) +
+              \text{left_slope} \cdot \min(0, x - x_{\text{offset}})$$
+            </div>
+            <div class="figure-container">
+              <figure>
+                <img src="./images/PRELU_-.5_.1_1 2.png" alt="Description 1" />
+                <figcaption>
+                  PReLU with left_slope = -0.5, right_slope = 0.1, and offset =
+                  1
+                </figcaption>
+              </figure>
+              <figure>
+                <img
+                  src="./images/PRELU_.2_.6_-1.2 2.png"
+                  alt="Description 2"
+                />
+                <figcaption>
+                  PReLU with left_slope = 0.2, right_slope = 0.6, and offset =
+                  -1.2
+                </figcaption>
+              </figure>
+            </div>
+            <p>
+              Extends traditional ReLU with learnable slopes and offset,
+              allowing asymmetric behavior and adjustable activation thresholds.
+              The separate left and right slopes enable distinct treatment of
+              positive and negative inputs.
+            </p>
+          </li>
+          <li>
+            <p><strong>Swish (SiLU)</strong>:</p>
+            <div class="equation-container">$$f(x) = x \cdot \sigma(x)$$</div>
+            <figure>
+              <img src="/images/Swish.png" alt="Description" />
+              <figcaption>ReLU activation</figcaption>
+            </figure>
+            <p>
+              This is the parametric swish activation function with $\beta$
+              fixed to 1. This will provide us a clear way to directly compare
+              the benefits of learnable parameters while isolating out other
+              variables like function shape and structure.
+            </p>
+          </li>
+
+          <li>
+            <p><strong>SwiGLU</strong>:</p>
+            <div class="equation-container">
+              $$f(x) = \text{Swish}_\beta(xW_1 + b) \otimes (xW_2+ c)$$
+            </div>
+            <div class="figure-container">
+              <figure>
+                <img
+                  src="./images/SWIGLU_1_1.5_-.5_.5_-2 2.png"
+                  alt="Description 1"
+                />
+                <figcaption>
+                  SwiGLU with $\beta = 1, W_1 = 1.5, b = -0.5, W_2 = 0.5, c =
+                  -2$
+                </figcaption>
+              </figure>
+              <figure>
+                <img src="./images/SWIGLU_ALL1 2.png" alt="Description 2" />
+                <figcaption>
+                  SwiGLU with $\beta = 1, W_1 = 1, b = 1, W_2 = 1, c = 1$
+                </figcaption>
+              </figure>
+            </div>
+            <p>
+              Combines gating mechanisms with linear transformations, enabling
+              complex input-dependent behavior. The separate pathways (W₁, W₂)
+              allow specialized feature processing and gating.
+            </p>
+          </li>
+
+          <li>
+            <p><strong>S-shaped ReLU (SReLU)</strong>:</p>
+            <div class="equation-container">
+              $$f(x) = \begin{cases} t_{\text{left}} + a_{\text{left}}(x -
+              t_{\text{left}}) & \text{if } x \leq t_{\text{left}} \\ x &
+              \text{if } t_{\text{left}} < x < t_{\text{right}} \\
+              t_{\text{right}} + a_{\text{right}}(x - t_{\text{right}}) &
+              \text{if } x \geq t_{\text{right}} \end{cases}$$
+            </div>
+            <div class="figure-container">
+              <figure>
+                <img
+                  src="./images/SReLU_-1.2_.3_3.3_-.1 2.png"
+                  alt="Description 1"
+                />
+                <figcaption>
+                  SReLU with $t_{\text{left}} =-1.2 , a_{\text{left}} = 0.3,
+                  t_{\text{right}} = 3.3, a_{\text{right}} = -0.1$
+                </figcaption>
+              </figure>
+              <figure>
+                <img
+                  src="./images/SRELU_1_-.5_2.7_-.9 2.png"
+                  alt="Description 2"
+                />
+                <figcaption>
+                  SReLU with $t_{\text{left}} =1 , a_{\text{left}} = -0.5,
+                  t_{\text{right}} = 2.7, a_{\text{right}} = -0.9$
+                </figcaption>
+              </figure>
+            </div>
+            <p>
+              Provides learnable transitions between linear regions, allowing
+              smooth saturation effects. The thresholds (t_left, t_right) and
+              slopes (a_left, a_right) adapt to the data distribution.
+            </p>
+          </li>
+
+          <li>
+            <p><strong>Fixed SReLU</strong>:</p>
+            <div class="equation-container">
+              $$f(x) = \begin{cases} -1 + 0.2(x + 1) & \text{if } x \leq -1 \\ x
+              & \text{if } -1 < x < 1 \\ 1 + 0.2(x - 1) & \text{if } x \geq 1
+              \end{cases}$$
+            </div>
+            <figure>
+              <img src="/images/FRELU 2.png" alt="Description" />
+              <figcaption>
+                SReLU with $t_{\text{left}} = -1 , a_{\text{left}} = 0.2,
+                t_{\text{right}} = 1, a_{\text{right}} = 0.2$
+              </figcaption>
+            </figure>
+            <p>
+              A version of SReLU with the previously paramtricic paramters fixed
+              to a specific instantiation. Althought the specific paramters
+              chosen are (for the most part) arbitrary, this will give us a
+              clear activation function that we can compare with SReLU to
+              isolate the effect of trainable parameters.
+            </p>
+          </li>
+          <li>
+            <p><strong>Bendable Linear Unit (BLU)</strong>:</p>
+            <div class="equation-container">
+              $$f(x) = \beta(\sqrt{x^2 + 1} - 1) + x$$
+            </div>
+            <div class="figure-container">
+              <figure>
+                <img src="./images/BLU_-.9 2.png" alt="Description 1" />
+                <figcaption>BLU with $\beta = -0.9$</figcaption>
+              </figure>
+              <figure>
+                <img src="./images/BLU_.88 2.png" alt="Description 2" />
+                <figcaption>BLU with $\beta = 0.88$</figcaption>
+              </figure>
+            </div>
+            <p>
+              Offers a continuous transition between linear and non-linear
+              behavior through β, constrained to [-1, 1] via tanh. The square
+              root term provides smooth non-linearity while maintaining gradient
+              flow.
+            </p>
+          </li>
+
+          <li>
+            <p><strong>ReLU</strong>:</p>
+            <div class="equation-container">$$f(x) = \max(0, x)$$</div>
+            <figure>
+              <img src="/images/RELU 2.png" alt="Description" />
+              <figcaption>ReLU activation</figcaption>
+            </figure>
+            <p>
+              Serves as our control case, providing simple non-linearity with
+              strong empirical success.
+            </p>
+          </li>
+        </ol>
+
+        <p class="indented">
+          All activation functions are coupled with batch normalization to
+          stabilize training. The learnable parameters are updated via
+          backpropagation with the following training protocol:
+        </p>
+        <ul>
+          <li>AdamW optimizer with weight decay 1e-5 for regularization</li>
+          <li>
+            Initial learning rate of 0.003 with ReduceLROnPlateau scheduling for
+            adaptive optimization
+          </li>
+          <li>
+            Gradient Clipping (max absolute value of 1) to prevent exploding
+            gradinets
+          </li>
+          <li>
+            MSE loss to directly optimize pixel-wise reconstruction quality
+          </li>
+          <li>Large batch sizes (512/1024) to stabilize gradient estimates</li>
+          <li>Extended training duration (100 epochs) to ensure convergence</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Results</h2>
+        <p class="indented">
+          Our experimental results demonstrate the comparative effectiveness of
+          different activation functions and architectural choices across
+          multiple performance dimensions.
+        </p>
+
+        <h3>Training Dynamics and Computational Requirements</h3>
+        <p class="indented">
+          All experiments were conducted under standardized conditions using
+          consumer-grade hardware (2080Ti GPU and i7 Processor). To ensure
+          reproducibility, we maintained consistent environmental factors
+          including computer settings, background processes, and power
+          consumption across all experimental runs. The following visualizations
+          present our findings, though initial interpretations warrant careful
+          consideration.
+        </p>
+
+        <figure>
+          <img
+            src="./images/Computation Time-2.png"
+            alt="Training curves showing loss convergence"
+          />
+          <figcaption>
+            Figure 1: Computation time (in seconds) across all models and
+            activation functions.
+          </figcaption>
+        </figure>
+
+        <div class="figure-container">
+          <figure>
+            <img
+              src="./images/Average Computation Time by Function Type.png"
+              alt="GPU memory usage"
+            />
+            <figcaption>
+              Figure 2a: Average computation time comparison between parametric
+              and non-parametric activation functions.
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              src="./images/Standard Deviation by Function Type.png"
+              alt="Training time comparison"
+            />
+            <figcaption>
+              Figure 2b: Standard deviation in training duration comparing
+              parametric and non-parametric functions.
+            </figcaption>
+          </figure>
+        </div>
+
+        <p class="indented">
+          Initial analysis of these results might suggest that parametric
+          activation functions inherently incur substantial increases in both
+          computation time and training variability. Figure 2a demonstrates
+          consistently higher average computation times for parametric
+          functions, seemingly indicating a computational overhead for trainable
+          activations. Meanwhile, Figure 2b reveals elevated training
+          variability in non-parametric functions, potentially suggesting
+          training instability. However, closer examination of Figure 1 reveals
+          a critical insight: the SwiGLU activation function represents a
+          significant outlier in our dataset. This divergence stems from
+          SwiGLU's substantially larger parameter space compared to other
+          parametric functions, resulting in training times that significantly
+          deviate from the distribution of other parametric functions. Excluding
+          this outlier provides a more nuanced perspective on the computational
+          cost of parametric functions.
+        </p>
+
+        <div class="figure-container">
+          <figure>
+            <img
+              src="./images/Average Computation Time by Function Type (w_out SwiGLU).png"
+              alt="GPU memory usage"
+            />
+            <figcaption>
+              Figure 3a: Average computation time comparison between parametric
+              and non-parametric activation functions, excluding SwiGLU.
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              src="./images/Standard Deviation by Function Type (w_out SwiGLU).png"
+              alt="Training time comparison"
+            />
+            <figcaption>
+              Figure 3b: Standard deviation in training duration between
+              parametric and non-parametric functions, excluding SwiGLU.
+            </figcaption>
+          </figure>
+        </div>
+
+        <p class="indented">
+          These revised visualizations reveal that typical parametric activation
+          functions impose negligible overhead in terms of computation time and
+          training variance. This aligns with our theoretical expectations,
+          given PyTorch's efficient automatic differentiation system, which
+          introduces minimal computational overhead when calculating gradients
+          for the modest number of additional parameters. However, these metrics
+          alone don't capture the complete story, particularly regarding the
+          nuanced requirements for training stability.
+        </p>
+
+        <p class="indented">
+          In our initial implementations without robust training safeguards
+          (gradient clipping, batch normalization, learning rate scheduling),
+          models employing parametric activation functions exhibited
+          vulnerability to gradient explosion and numerical instability. These
+          issues frequently manifested as NaN values, compromising the training
+          process—a phenomenon notably absent in non-parametric functions. This
+          observation suggests that the true computational cost of parametric
+          functions should include the overhead required for implementing these
+          stability measures, despite their absence in our timing metrics.
+          Nevertheless, for models already incorporating these training
+          safeguards, the incremental impact of reasonable parametric functions
+          on computation time remains minimal.
+        </p>
+
+        <p class="indented">
+          Key observations regarding computational efficiency and training:
+        </p>
+        <ul>
+          <li>
+            SwiGLU's computational demands significantly exceed other parametric
+            activation functions due to its expanded parameter space
+          </li>
+          <li>
+            Parametric activation functions demand more robust training
+            safeguards to ensure stability
+          </li>
+          <li>
+            Given appropriate training infrastructure, conventional parametric
+            activation functions introduce minimal computational overhead
+          </li>
+        </ul>
+        <h3>Model Performance and Validation Results</h3>
+        <p class="indented">
+          Mean Squared Error (MSE) on the validation set serves as our primary
+          metric for evaluating architectural choices, providing insights into
+          both reconstruction quality and generalization capability. We begin
+          our analysis by examining the comprehensive relationship between model
+          architecture, activation function selection, and validation
+          performance.
+        </p>
+
+        <figure>
+          <img
+            src="./images/Validation Loss .png"
+            alt="Validation performance comparison"
+          />
+          <figcaption>
+            Figure 4: Validation performance metrics across model architectures
+            and activation functions.
+          </figcaption>
+        </figure>
+
+        <p class="indented">
+          A notable pattern emerges from this visualization: models at both
+          extremes of the size spectrum exhibit inferior performance compared to
+          their moderately-sized counterparts. This observation aligns with
+          classical generalization theory, which predicts distinct underfitting
+          and overfitting regimes (note that our computational constraints
+          prevented exploration of the deep learning regime). The following
+          figures illustrate this relationship, comparing our empirical results
+          with theoretical predictions.
+        </p>
+
+        <div class="figure-container">
+          <figure>
+            <img
+              src="./images/Average Validation Loss.png"
+              alt="GPU memory usage"
+            />
+            <figcaption>
+              Figure 5a: Average validation loss with smooth interpolation
+              across model sizes.
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              src="./images/overfitting.png"
+              alt="Training time comparison"
+            />
+            <figcaption>
+              Figure 5b: Theoretical performance curve according to classical
+              generalization theory.
+            </figcaption>
+          </figure>
+        </div>
+
+        <p class="indented">
+          Recalling our earlier analysis of SwiGLU's computational demands
+          stemming from its extensive parameterization, we can meaningfully
+          aggregate the remaining parametric and non-parametric activation
+          functions to investigate potential performance advantages of learnable
+          activations.
+        </p>
+
+        <div class="figure-container">
+          <figure>
+            <img
+              src="./images/Average Validation Loss by Type.png"
+              alt="GPU memory usage"
+            />
+            <figcaption>
+              Figure 6a: Average validation loss stratified by activation
+              function category.
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              src="./images/Average Validation Loss by Type-2.png"
+              alt="Training time comparison"
+            />
+            <figcaption>
+              Figure 6b: Temporal evolution of average validation loss across
+              categories.
+            </figcaption>
+          </figure>
+        </div>
+        <p class="indented">
+          Two significant trends emerge from these visualizations. Figure 6a
+          reveals that SwiGLU maintains performance parity with other functions
+          in smaller architectures (models 1-3) but demonstrates clear
+          superiority in larger configurations (models 4-7). This could indicate
+          that SwiGLU's rich parameterization enables these larger models to
+          enter the deep learning regime while others remain in the overfitting
+          phase. Alternatively, SwiGLU's complexity might enable the discovery
+          of subtle data relationships inaccessible to simpler functions.
+          Further experimentation is needed for definitive conclusions. Figure
+          6b highlights another intriguing pattern: parametric models excel with
+          smaller architectures but underperform in larger configurations. This
+          likely reflects that in capacity-constrained scenarios (underfitting
+          regime), parametric functions provide crucial additional expressivity.
+          However, in larger models where capacity is abundant, this added
+          flexibility may actually impede optimization by expanding the solution
+          space unnecessarily. Let's examine these patterns at a finer
+          granularity.
+        </p>
+        <div class="figure-container">
+          <figure>
+            <img
+              src="./images/Average Loss by Activation Function-2.png"
+              alt="GPU memory usage"
+            />
+            <figcaption>
+              Figure 7a: Detailed breakdown of validation loss by activation
+              function.
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              src="./images/Validation Loss of SiLU and SReLU.png"
+              alt="Training time comparison"
+            />
+            <figcaption>
+              Figure 7b: Performance comparison between optimal parametric and
+              non-parametric functions.
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="figure-container">
+          <figure>
+            <img
+              src="./images/Standard Deviation by Activation Function .png"
+              alt="GPU memory usage"
+            />
+            <figcaption>
+              Figure 8a: Performance variability across activation functions.
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              src="./images/Standard Deviation by Function Type-3.png"
+              alt="Training time comparison"
+            />
+            <figcaption>
+              Figure 8b: Comparative stability analysis of parametric versus
+              non-parametric functions.
+            </figcaption>
+          </figure>
+        </div>
+        <p class="indented">
+          Figure 7a reveals an interesting dichotomy: both the best and
+          worst-performing activation functions belong to the parametric
+          category, indicating that parameterization alone doesn't guarantee
+          superior performance. This suggests, albeit with limited statistical
+          confidence, that performance variance might not significantly differ
+          between parametric and non-parametric functions. Furthermore,
+          examining the top performers from each category (Figure 7b), we
+          observe remarkably similar performance trajectories, with SReLU
+          maintaining only a marginal advantage over SiLU.
+        </p>
+      </section>
+      <section>
+        <h2>Conclusion</h2>
+        <p class="indented">
+          Our analysis is evidence for the intuitive hypothesis that merely
+          incorporating parametric activation functions into existing
+          architectures does not guarantee performance improvements. However,
+          we've also identified specific scenarios (small models where
+          underfitting is potentially a problem) where these functions can
+          deliver benefits. This understanding positions parametric activation
+          functions not as a universal solution, but rather as one tool among
+          many within the deep learning framework. They should be deployed when
+          circumstances warrant their use. Based on our experimental evidence,
+          the potential performance gains offered by parametric activation
+          functions typically don't justify the additional complexity, training
+          instability, and computational overhead they introduce in general
+          applications. Without compelling evidence for their necessity in
+          specific cases, this study suggests that further research into
+          parametric activation functions is needed before they can be
+          confidently recommended as a standard choice for researchers and
+          practitioners in the field.
+        </p>
+      </section>
+
+      <section class="references">
+        <h2>References</h2>
+        <p>
+          [1] L. B. Godfrey, "An Evaluation of Parametric Activation Functions
+          for Deep Learning," in
+          <i
+            >2019 IEEE International Conference on Systems, Man and Cybernetics
+            (SMC)</i
+          >, 2019, pp. 3006-3011.
+        </p>
+
+        <p>
+          [2] S. R. Dubey, S. K. Singh, and B. B. Chaudhuri, "A Comprehensive
+          Survey and Performance Analysis of Activation Functions in Deep
+          Learning," <i>arXiv preprint arXiv:2109.14545</i>, 2021.
+        </p>
+
+        <p>
+          [3] N. Shazeer, "GLU Variants Improve Transformer,"
+          <i>arXiv preprint arXiv:2002.05202</i>, 2020.
+        </p>
+
+        <p>
+          [4] X. Jin, C. Xu, J. Feng, Y. Wei, J. Xiong, and S. Yan, "Deep
+          Learning with S-shaped Rectified Linear Activation Units,"
+          <i>arXiv preprint arXiv:1512.07030</i>, 2015.
+        </p>
+
+        <p>
+          [5] H. H. Chieng, N. Wahid, and P. Ong, "Parametric Flatten-T Swish:
+          An Adaptive Non-linear Activation Function For Deep Learning,"
+          <i>arXiv preprint arXiv:2011.03155</i>, 2020.
+        </p>
+
+        <p>
+          [6] J. U. Rahman, R. Zulfiqar, A. Khan, and Nimra, "SwishReLU: A
+          Unified Approach to Activation Functions for Enhanced Deep Neural
+          Networks Performance," <i>arXiv preprint arXiv:2407.08232</i>, 2024.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
